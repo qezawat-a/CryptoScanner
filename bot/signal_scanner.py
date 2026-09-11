@@ -21,6 +21,29 @@ TF_WEIGHTS = {"1m": 0.5, "3m": 0.8, "5m": 1.0, "15m": 1.5, "30m": 2.0,
 UNIT = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
 
 
+def _flat_or_stale(candles: list, interval: str) -> str:
+    """Data e delist/freeze شده: hich signal nade. Returns reason or ''."""
+    try:
+        seconds = int(interval[:-1]) * UNIT.get(interval[-1:], 60)
+    except Exception:
+        seconds = 60
+    try:
+        last_ts = float(candles[-1]["timestamp"])
+        if last_ts < 1e12:
+            last_ts *= 1000
+        if time.time() * 1000 - last_ts > seconds * 1000 * 3:
+            return "stale_data"
+    except Exception:
+        pass
+    try:
+        closes = [float(c["close"]) for c in candles[-60:]]
+        if max(closes) - min(closes) <= 0:
+            return "flat_data"
+    except Exception:
+        pass
+    return ""
+
+
 def drop_forming_candle(candles: list, interval: str) -> list:
     try:
         seconds = int(interval[:-1]) * UNIT.get(interval[-1:], 60)
@@ -58,6 +81,10 @@ class SignalScanner:
         if len(candles) < 40:
             return {"direction": "NEUTRAL", "confidence": 0, "all_signals": [],
                     "strategies_used": [], "error": "insufficient_data"}
+        bad = _flat_or_stale(candles, interval)
+        if bad:
+            return {"direction": "NEUTRAL", "confidence": 0, "all_signals": [],
+                    "strategies_used": [], "error": bad}
         closes = [c["close"] for c in candles]
         volumes = [c["volume"] for c in candles]
         return self.engine.get_consensus(closes, volumes, tf_min, min_agree)
@@ -123,7 +150,7 @@ class SignalScanner:
         gate = int(self.settings.get("tf_min_confidence", 70))
         for tf, r in result.get("timeframe_results", {}).items():
             if r.get("error"):
-                lines.append(f"  {tf}: no data")
+                lines.append(f"  {tf}: no data ({r['error']})")
                 continue
             fired, below = [], []
             for s in r.get("all_signals", []):
