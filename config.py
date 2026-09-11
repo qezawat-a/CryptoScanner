@@ -24,6 +24,7 @@ DEFAULTS = {
 
 TELEGRAM_BOT_TOKEN = _get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_USER_ID = _get("TELEGRAM_USER_ID", "")
+DATABASE_URL = _get("DATABASE_URL", "")  # Neon pooled URL (Railway Variables)
 
 
 class Config:

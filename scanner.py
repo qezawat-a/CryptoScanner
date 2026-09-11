@@ -29,7 +29,6 @@ logger = logging.getLogger("scanner_main")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
-SIGNALS_LOG = os.path.join(BASE_DIR, "signals.log")
 
 settings = dict(config.DEFAULTS)
 if os.path.exists(SETTINGS_PATH):
@@ -40,12 +39,39 @@ if os.path.exists(SETTINGS_PATH):
         logger.warning(f"settings.json khande nashod: {e}")
 
 
+INT_SETTINGS = ("min_confidence", "tf_min_confidence", "min_agreeing_strategies",
+                "cooldown_minutes", "scan_interval_sec", "report_interval_sec")
+
+# ---------- database (Neon, fallback SQLite local) ----------
+db = None
+try:
+    from bot.db import DB
+    db = DB()
+    if db.has_any_setting():
+        for k, v in db.all_settings().items():
+            settings[k] = int(v) if k in INT_SETTINGS else v
+        logger.info("Settings loaded from DB.")
+    else:
+        for k, v in settings.items():
+            db.set_setting(k, v)
+        logger.info("Settings seeded to DB.")
+except Exception as e:
+    logger.warning(f"DB OFF (file-only mode): {e}")
+    db = None
+
+
 def save_settings():
     try:
         with open(SETTINGS_PATH, "w") as f:
             json.dump(settings, f, indent=2)
     except Exception as e:
         logger.warning(f"save settings failed: {e}")
+    if db:
+        try:
+            for k, v in settings.items():
+                db.set_setting(k, v)
+        except Exception as e:
+            logger.warning(f"DB save failed: {e}")
 
 
 client = MarketClient()
@@ -110,6 +136,7 @@ def handle_command(text: str) -> str:
         return ("Scanner (no-trade) — haman strategy XT + LLM\n"
                 "/symbol BTC (ya saga_usdt) — avaz symbol\n"
                 "/scan — scan fe'li\n"
+                "/history — signal haye sabt shode\n"
                 "/status — vaziat\n"
                 "/settings — didan hame tanzimat\n"
                 "/agent <soal> — harf ba agent (tahlil, chera ALIGNED نشد؟)\n"
@@ -131,6 +158,19 @@ def handle_command(text: str) -> str:
         sym = normalize_symbol(settings.get("symbol", "BTCUSDT"))
         res = scanner.scan_multi_timeframe(sym)
         return scanner.format_report(res)
+    if cmd == "history":
+        if not db:
+            return "DB OFF — history nist."
+        rows = db.recent_signals(8)
+        if not rows:
+            return "Hich signal sabt nashode."
+        import datetime
+        lines = ["=== Signal history ==="]
+        for r in rows:
+            t = datetime.datetime.fromtimestamp(r["ts"]).strftime("%m-%d %H:%M")
+            flag = "❌REJECT " if r["rejected"] else "🚨"
+            lines.append(f"{flag}{t} {r['symbol']} {r['direction']} {r['confidence']}% @ {r['price']} ({r['source']})")
+        return "\n".join(lines)
     if cmd == "status":
         return cmd_status()
     if cmd == "settings":
@@ -191,6 +231,7 @@ def tg_set_commands():
         return
     cmds = [
         ("scan", "Scan fe'li symbol"),
+        ("history", "Signal haye sabt shode"),
         ("symbol", "Avaz symbol (mesal /symbol saga_usdt)"),
         ("status", "Vaziat scanner"),
         ("settings", "Didan hame tanzimat"),
@@ -271,11 +312,10 @@ def scan_loop():
                                 verdict = f"CONFIRM: (verdict error: {e})"
                             if verdict.strip().upper().startswith("REJECT"):
                                 logger.info(f"ALIGNED rejected by LLM {sym} {direction}")
-                                with open(SIGNALS_LOG, "a") as f:
-                                    f.write(json.dumps({"t": now, "symbol": sym, "rejected": True,
-                                                          "direction": direction,
-                                                          "confidence": res["confidence"],
-                                                          "reason": verdict[:300]})+"\n")
+                                if db:
+                                    db.log_signal(sym, direction, res["confidence"],
+                                                  res.get("signal_strength", 0), res.get("price", 0),
+                                                  res.get("source", ""), verdict, rejected=True)
                                 cooldowns[cd_key] = now
                                 continue
                         msg = "🚨 " + report
@@ -283,9 +323,10 @@ def scan_loop():
                             msg += f"\n\n🧠 {verdict}"
                         msg += f"\nKCEX manual: {direction} {to_display(sym)} @ ~{res['price']}"
                         tg_send(msg)
-                        with open(SIGNALS_LOG, "a") as f:
-                            f.write(json.dumps({"t": now, "symbol": sym, **{k: res.get(k) for k in (
-                                "direction", "confidence", "signal_strength", "price", "source")}})+"\n")
+                        if db:
+                            db.log_signal(sym, direction, res["confidence"],
+                                          res.get("signal_strength", 0), res.get("price", 0),
+                                          res.get("source", ""), verdict)
                         cooldowns[cd_key] = now
                         last_alert[sym] = (direction, now)
                         logger.info(f"ALIGNED {sym} {direction} {res['confidence']}% -> alert sent")
