@@ -177,6 +177,33 @@ def handle_command(text: str) -> str:
     return ""
 
 
+def tg_set_commands():
+    """Menu e command ha tu Telegram (/) — mesle mini-app list."""
+    token = config.TELEGRAM_BOT_TOKEN
+    if not token:
+        return
+    cmds = [
+        ("scan", "Scan fe'li symbol"),
+        ("symbol", "Avaz symbol (mesal /symbol saga_usdt)"),
+        ("status", "Vaziat scanner"),
+        ("settings", "Didan hame tanzimat"),
+        ("agent", "Harf ba agent (mesal /agent chera sabr?)"),
+        ("timeframes", "Set timeframes"),
+        ("minconf", "Set min confidence"),
+        ("tfmin", "Set timeframe min confidence"),
+        ("agree", "Set min agreeing strategies"),
+        ("cooldown", "Set cooldown (daghighe)"),
+        ("interval", "Set scan interval (sanie)"),
+    ]
+    try:
+        requests.post(f"https://api.telegram.org/bot{token}/setMyCommands",
+                      json={"commands": [{"command": c, "description": d} for c, d in cmds]},
+                      timeout=15)
+        logger.info("Telegram command menu set.")
+    except Exception as e:
+        logger.warning(f"setMyCommands failed: {e}")
+
+
 def telegram_poll():
     token = config.TELEGRAM_BOT_TOKEN
     uid = str(config.TELEGRAM_USER_ID or "")
@@ -279,6 +306,7 @@ def main():
     logger.info(f"Scanner start: {to_display(sym)} ok={ok} {src} @ {price}")
     logger.info(cmd_status())
     tg_send("✅ Scanner روشن شد (no-trade)\n" + cmd_status())
+    tg_set_commands()
 
     t1 = threading.Thread(target=telegram_poll, daemon=True)
     t1.start()
