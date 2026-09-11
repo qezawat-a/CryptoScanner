@@ -90,7 +90,11 @@ class ScanTools:
         from bot.market_client import normalize_symbol
         sym = normalize_symbol(args.get("symbol") or self.settings.get("symbol", "BTCUSDT"))
         res = self.scanner.scan_multi_timeframe(sym)
-        return self.scanner.format_report(res)
+        out = self.scanner.format_report(res)
+        out += ("\n[GHANOON baraye to (LLM): FIRED=signal motabar | IGNORED=BI ASAR, "
+                "hichvaght jahatesho be user be onvan signal nago | "
+                "VERDICT khat e akhar harfe akhare — khalafesh chizi nago]")
+        return out
 
     def _mdata(self, args: dict) -> str:
         from bot.market_client import normalize_symbol

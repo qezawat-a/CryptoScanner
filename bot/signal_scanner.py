@@ -138,6 +138,26 @@ class SignalScanner:
         return (result["direction"] != "NEUTRAL"
                 and result["confidence"] >= int(self.settings.get("min_confidence", 80)))
 
+    def verdict(self, result: dict) -> str:
+        """Jomle e sade va ghatei: hich LLM/user ghati nakone."""
+        min_conf = int(self.settings.get("min_confidence", 80))
+        if self.is_aligned(result):
+            return (f"ALIGNED {result['direction']} {result['confidence']}% — "
+                    f"signal motabar (balaye had {min_conf}%)")
+        vetoes = [r.get("veto_reason") for r in result.get("timeframe_results", {}).values()
+                  if r.get("veto_reason")]
+        if vetoes:
+            return f"SABR — veto: {vetoes[0]}"
+        if result["direction"] != "NEUTRAL":
+            return (f"SABR — {result['direction']} zaif "
+                    f"({result['confidence']}% < had {min_conf}%)")
+        fired = any(r.get("direction") != "NEUTRAL"
+                    for r in result.get("timeframe_results", {}).values()
+                    if not r.get("error"))
+        if fired:
+            return "SABR — TF ha hamjahan nistan (alignment kam)"
+        return "SABR — hich timeframe fire nakard"
+
     def format_report(self, result: dict) -> str:
         sym = result.get("symbol", "?")
         lines = [f"=== SCAN [{sym}] ({result.get('source', '?')}) ===",
@@ -160,15 +180,16 @@ class SignalScanner:
                 (below if s["confidence"] < gate else fired).append(e)
             parts = []
             if fired:
-                parts.append(", ".join(fired))
+                parts.append("FIRED: " + ", ".join(fired))
             if below:
-                parts.append(f"below {gate}%: {', '.join(below)}")
+                parts.append(f"IGNORED (zire gate {gate}%, BI ASAR): {', '.join(below)}")
             lines.append(f"  {tf}: {r['direction']} ({r['confidence']}%) [{(' | '.join(parts)) or 'no fire'}]")
             if r.get("veto_reason"):
                 lines.append(f"      veto: {r['veto_reason']}")
             if r.get("rsi") is not None:
                 lines.append(f"      RSI: {r['rsi']:.1f}")
         lines.append(f"Long: {result.get('long_weight', 0):.2f} | Short: {result.get('short_weight', 0):.2f}")
+        lines.append(f"VERDICT: {self.verdict(result)}")
         if self.is_aligned(result):
             lines.append(f"\n>>> ALIGNED {result['direction']} — baraye KCEX dasti <<<")
         return "\n".join(lines)
