@@ -111,6 +111,7 @@ def handle_command(text: str) -> str:
                 "/symbol BTC (ya saga_usdt) — avaz symbol\n"
                 "/scan — scan fe'li\n"
                 "/status — vaziat\n"
+                "/settings — didan hame tanzimat\n"
                 "/agent <soal> — harf ba agent (tahlil, chera ALIGNED نشد؟)\n"
                 "/timeframes 1m,5m,15m,1h\n"
                 "/minconf 80 | /tfmin 70 | /agree 2\n"
@@ -131,6 +132,14 @@ def handle_command(text: str) -> str:
         return scanner.format_report(res)
     if cmd == "status":
         return cmd_status()
+    if cmd == "settings":
+        lines = ["=== Settings (mesle XT, ba chat avaz mishe) ==="]
+        for k in ("symbol", "timeframes", "min_confidence", "tf_min_confidence",
+                  "min_agreeing_strategies", "cooldown_minutes",
+                  "scan_interval_sec", "report_interval_sec"):
+            lines.append(f"{k} = {settings.get(k)}")
+        lines.append("Mesal: /symbol saga_usdt | /minconf 80 | /agree 2")
+        return "\n".join(lines)
     if cmd == "timeframes" and arg:
         settings["timeframes"] = arg
         save_settings()
