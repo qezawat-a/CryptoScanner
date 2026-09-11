@@ -149,7 +149,7 @@ def handle_command(text: str) -> str:
         sym = normalize_symbol(arg)
         ok, src, price = client.validate(sym)
         if not ok:
-            return f"{arg} tu hich perp market nist (Binance-Futures/Bybit/MEXC/Gate/OKX/Bitget). Mesal: BTC, saga_usdt, brew_usdt"
+            return f"{arg} tu hich perp market nist (Binance/Bybit/MEXC/Gate/OKX/Bitget/BingX). Mesal: BTC, saga_usdt, brew_usdt"
         settings["symbol"] = sym
         save_settings()
         scanner.settings.update(settings)

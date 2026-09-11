@@ -108,7 +108,7 @@ class ScanTools:
         sym = normalize_symbol(args.get("symbol", ""))
         ok, src, price = self.client.validate(sym)
         if not ok:
-            return f"{args.get('symbol')} tu hich perp market nist (Binance-Futures/Bybit/MEXC/Gate/OKX/Bitget)."
+            return f"{args.get('symbol')} tu hich perp market nist (Binance/Bybit/MEXC/Gate/OKX/Bitget/BingX)."
         self.settings["symbol"] = sym
         self._save()
         self.scanner.settings.update(self.settings)
