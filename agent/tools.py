@@ -26,7 +26,7 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {
          "symbol": {"type": "string", "description": "new symbol"}}}, "required": ["symbol"]},
     {"name": "set_setting",
-     "description": "Tanzim (alias ham ghabul: minconf, tfmin, agree, cooldown, interval). Canonical: timeframes, min_confidence, tf_min_confidence, min_agreeing_strategies, cooldown_minutes, scan_interval_sec.",
+     "description": "Tanzim (alias: minconf, tfmin, agree, cooldown, interval, report). MOHEM - 2 interval fargh daran: scan_interval_sec = har chand saniye scan run shevad (SILENT, faghat ALIGNED alert). report_interval_sec = gozaresh KAMEL har N saniye ferestade shavad hatta bedune signal (0 = faghat ALIGNED). 'report interval'/'send reports'/'show me scans'/'bebinim chi mige' => report_interval_sec. 'scan interval'/'scan frequency'/'faster scan' => scan_interval_sec. HARGEZ een 2 ta ro ghati nakon!",
      "parameters": {"type": "object", "properties": {
          "key": {"type": "string"}, "value": {"type": "string"}}}, "required": ["key", "value"]},
     {"name": "remember",
