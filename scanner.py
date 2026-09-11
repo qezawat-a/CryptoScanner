@@ -116,6 +116,7 @@ def handle_command(text: str) -> str:
                 "/timeframes 1m,5m,15m,1h\n"
                 "/minconf 80 | /tfmin 70 | /agree 2\n"
                 "/cooldown 15 (daghighe) | /interval 60 (sanie)\n"
+                "/report 60 — ersal gozaresh kamel har 60s (0 = faghat ALIGNED)\n"
                 "Ya mostaghim chat kon — agent javab mide.")
     if cmd == "symbol" and arg:
         sym = normalize_symbol(arg)
@@ -170,6 +171,12 @@ def handle_command(text: str) -> str:
         save_settings()
         scanner.settings.update(settings)
         return f"scan interval: {settings['scan_interval_sec']}s"
+    if cmd == "report" and arg:
+        settings["report_interval_sec"] = max(0, int(arg))
+        save_settings()
+        scanner.settings.update(settings)
+        v = settings["report_interval_sec"]
+        return f"report: {'har ' + str(v) + 's gozaresh kamel' if v else 'OFF (faghat ALIGNED)'}"
     if cmd == "agent" and arg:
         if not agent:
             return "Brain OFF — AI_API_KEY ro tu .env bezar."
@@ -194,6 +201,7 @@ def tg_set_commands():
         ("agree", "Set min agreeing strategies"),
         ("cooldown", "Set cooldown (daghighe)"),
         ("interval", "Set scan interval (sanie)"),
+        ("report", "Gozaresh kamel periodic (0=off)"),
     ]
     try:
         requests.post(f"https://api.telegram.org/bot{token}/setMyCommands",
