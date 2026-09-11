@@ -167,12 +167,14 @@ class SignalScanner:
         if result["direction"] != "NEUTRAL":
             return (f"SABR — {result['direction']} zaif "
                     f"({result['confidence']}% < had {min_conf}%)")
-        fired = any(r.get("direction") != "NEUTRAL"
+        gate = int(self.settings.get("tf_min_confidence", 70))
+        fired = any(s["direction"] != "NEUTRAL" and s["confidence"] >= gate
                     for r in result.get("timeframe_results", {}).values()
-                    if not r.get("error"))
+                    if not r.get("error")
+                    for s in r.get("all_signals", []))
         if fired:
-            return "SABR — TF ha hamjahan nistan (alignment kam)"
-        return "SABR — hich timeframe fire nakard"
+            return "SABR — signal ha tak‌تک و parakande‌ست (min_agree nashod)"
+        return "SABR — hich signal e motabari nist"
 
     def format_report(self, result: dict) -> str:
         sym = result.get("symbol", "?")
