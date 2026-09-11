@@ -22,8 +22,6 @@ BINGX = "https://open-api.bingx.com"
 
 SOURCES = ("binance_futures", "bybit_linear", "mexc_swap",
            "gate_futures", "okx_swap", "bitget_mix", "bingx_swap")
-# Last resort: spot proxy (label moshakhas) — faghat vaghti hich perp nist (mesle STORJ)
-FALLBACK_SPOT = ("bingx_spot",)
 
 ALL_TF = {"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d", "1w"}
 NATIVE = {
@@ -34,7 +32,6 @@ NATIVE = {
     "okx_swap": set(ALL_TF),
     "bitget_mix": {"1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"},
     "bingx_swap": {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"},
-    "bingx_spot": {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"},
 }
 RESAMPLE = {"3m": 3}  # 3m = 3 x 1m (vagheie, na copy)
 
@@ -137,7 +134,7 @@ class MarketClient:
     def _order(self, sym: str) -> list:
         prefer = self._source.get(sym)
         order = [prefer] if prefer else []
-        return order + [s for s in SOURCES + FALLBACK_SPOT if s not in order]
+        return order + [s for s in SOURCES if s not in order]
 
     @staticmethod
     def _is_dead(candles: list, interval: str) -> bool:
@@ -322,24 +319,6 @@ class MarketClient:
 
     def _p_bingx_swap(self, sym: str) -> float:
         kl = self._k_bingx_swap(sym, "1m", 2)
-        if not kl:
-            raise ValueError("no symbol")
-        return float(kl[-1]["close"])
-
-    # ---------- BingX spot (LAST RESORT — label: bingx_spot) ----------
-
-    def _k_bingx_spot(self, sym: str, interval: str, limit: int) -> list:
-        j = self._get(f"{BINGX}/openApi/spot/v1/market/kline",
-                      {"symbol": _dash(sym), "interval": interval, "limit": min(limit, 1440)})
-        rows = j.get("data") or []
-        if not rows:
-            raise ValueError("no symbol")
-        # [time(ms), o,h,l,c, vol, ...]
-        return [{"timestamp": float(k[0]), "open": float(k[1]), "high": float(k[2]),
-                 "low": float(k[3]), "close": float(k[4]), "volume": float(k[5])} for k in rows]
-
-    def _p_bingx_spot(self, sym: str) -> float:
-        kl = self._k_bingx_spot(sym, "1m", 2)
         if not kl:
             raise ValueError("no symbol")
         return float(kl[-1]["close"])
