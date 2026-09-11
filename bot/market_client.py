@@ -12,6 +12,7 @@ import requests
 logger = logging.getLogger("market_client")
 
 BINANCE = "https://api.binance.com"
+FAPI = "https://fapi.binance.com"
 MEXC = "https://api.mexc.com"
 BYBIT = "https://api.bybit.com"
 GATE = "https://api.gateio.ws"
@@ -33,7 +34,7 @@ BITGET_GRAN = {"1m": "1min", "3m": "3min", "5m": "5min", "15m": "15min", "30m": 
 MEXC_INTERVAL = {"1m": "1m", "3m": "5m", "5m": "5m", "15m": "15m", "30m": "30m",
                  "1h": "1h", "2h": "4h", "4h": "4h", "1d": "1D", "1w": "1W"}
 
-SOURCES = ("binance", "bybit_spot", "bybit_linear", "mexc", "gate", "okx", "kucoin", "bitget")
+SOURCES = ("binance", "binance_futures", "bybit_linear", "bybit_spot", "mexc", "gate", "okx", "kucoin", "bitget")
 
 
 def normalize_symbol(raw: str) -> str:
@@ -118,11 +119,12 @@ class MarketClient:
         r.raise_for_status()
         return r.json()
 
-    # ---------- Binance / MEXC (same format) ----------
+    # ---------- Binance / MEXC (same format; FAPI = perpetual futures) ----------
 
-    def _binance_like_klines(self, base: str, sym: str, interval: str, limit: int) -> list:
+    def _binance_like_klines(self, base: str, sym: str, interval: str, limit: int,
+                             prefix: str = "/api/v3") -> list:
         try:
-            rows = self._get(f"{base}/api/v3/klines",
+            rows = self._get(f"{base}{prefix}/klines",
                              {"symbol": sym, "interval": interval, "limit": min(limit, 1000)})
         except Exception as e:
             if "400" in str(e):
@@ -131,9 +133,9 @@ class MarketClient:
         return [{"timestamp": float(k[0]), "open": float(k[1]), "high": float(k[2]),
                  "low": float(k[3]), "close": float(k[4]), "volume": float(k[5])} for k in rows]
 
-    def _binance_like_price(self, base: str, sym: str) -> float:
+    def _binance_like_price(self, base: str, sym: str, prefix: str = "/api/v3") -> float:
         try:
-            j = self._get(f"{base}/api/v3/ticker/price", {"symbol": sym})
+            j = self._get(f"{base}{prefix}/ticker/price", {"symbol": sym})
         except Exception as e:
             if "400" in str(e):
                 raise ValueError("no symbol")
@@ -142,6 +144,10 @@ class MarketClient:
 
     def _k_binance(self, s, i, n): return self._binance_like_klines(BINANCE, s, i, n)
     def _p_binance(self, s): return self._binance_like_price(BINANCE, s)
+    def _k_binance_futures(self, s, i, n):
+        return self._binance_like_klines(FAPI, s, i, n, prefix="/fapi/v1")
+    def _p_binance_futures(self, s):
+        return self._binance_like_price(FAPI, s, prefix="/fapi/v1")
 
     def _k_mexc(self, s, i, n):
         return self._binance_like_klines(MEXC, s, MEXC_INTERVAL.get(i, "1m"), n)
