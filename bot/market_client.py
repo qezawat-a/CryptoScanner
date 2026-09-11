@@ -18,9 +18,12 @@ MEXC_SWAP = "https://contract.mexc.com"
 GATE_FUT = "https://api.gateio.ws"
 OKX = "https://www.okx.com"
 BITGET = "https://api.bitget.com"
+BINGX = "https://open-api.bingx.com"
 
 SOURCES = ("binance_futures", "bybit_linear", "mexc_swap",
-           "gate_futures", "okx_swap", "bitget_mix")
+           "gate_futures", "okx_swap", "bitget_mix", "bingx_swap")
+# Last resort: spot proxy (label moshakhas) — faghat vaghti hich perp nist (mesle STORJ)
+FALLBACK_SPOT = ("bingx_spot",)
 
 ALL_TF = {"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d", "1w"}
 NATIVE = {
@@ -30,6 +33,8 @@ NATIVE = {
     "gate_futures": {"1m", "5m", "15m", "30m", "1h", "2h", "4h", "1d", "1w"},
     "okx_swap": set(ALL_TF),
     "bitget_mix": {"1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"},
+    "bingx_swap": {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"},
+    "bingx_spot": {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"},
 }
 RESAMPLE = {"3m": 3}  # 3m = 3 x 1m (vagheie, na copy)
 
@@ -93,6 +98,10 @@ class MarketClient:
                 out = sorted((c for c in out if c.get("close", 0) > 0),
                              key=lambda c: c["timestamp"])
                 if len(out) >= 40:
+                    if self._is_dead(out, interval):
+                        logger.warning(f"{src} dead data {sym} {interval} (flat/stale) -> next")
+                        self._source.pop(sym, None)
+                        continue
                     self._source[sym] = src
                     return out
             except Exception as e:
@@ -118,15 +127,38 @@ class MarketClient:
         sym = normalize_symbol(symbol)
         if not sym:
             return False, "?", 0.0
-        price = self.get_price(sym)
-        if price > 0:
-            return True, self.last_source(sym), price
-        return False, "?", 0.0
+        if self.get_price(sym) <= 0:
+            return False, "?", 0.0
+        # vitality confirm: source e morde (flat/stale) relock mishe ru live
+        if not self.get_klines(sym, "1m", limit=45):
+            return False, "?", 0.0
+        return True, self.last_source(sym), self.get_price(sym)
 
     def _order(self, sym: str) -> list:
         prefer = self._source.get(sym)
         order = [prefer] if prefer else []
-        return order + [s for s in SOURCES if s not in order]
+        return order + [s for s in SOURCES + FALLBACK_SPOT if s not in order]
+
+    @staticmethod
+    def _is_dead(candles: list, interval: str) -> bool:
+        """Delist/freeze: hame close yeksan ya candle jadid nayumade."""
+        try:
+            closes = [float(c["close"]) for c in candles[-60:]]
+            if max(closes) - min(closes) <= 0:
+                return True
+        except Exception:
+            pass
+        try:
+            unit = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
+            sec = int(interval[:-1]) * unit.get(interval[-1:], 60)
+            ts = float(candles[-1]["timestamp"])
+            if ts < 1e12:
+                ts *= 1000
+            if time.time() * 1000 - ts > sec * 1000 * 3:
+                return True
+        except Exception:
+            pass
+        return False
 
     def _get(self, url: str, params: dict = None):
         r = self._s.get(url, params=params or {}, timeout=self.timeout)
@@ -275,3 +307,39 @@ class MarketClient:
         if not rows:
             raise ValueError("no symbol")
         return float(rows[0].get("lastPr") or 0)
+
+    # ---------- BingX swap (perp) ----------
+
+    def _k_bingx_swap(self, sym: str, interval: str, limit: int) -> list:
+        j = self._get(f"{BINGX}/openApi/swap/v3/quote/klines",
+                      {"symbol": _dash(sym), "interval": interval, "limit": min(limit, 1440)})
+        rows = j.get("data") or []
+        if j.get("code") != 0 or not rows:
+            raise ValueError(f"BingX swap: {j.get('msg')}")
+        return [{"timestamp": float(k["time"]), "open": float(k["open"]),
+                 "high": float(k["high"]), "low": float(k["low"]),
+                 "close": float(k["close"]), "volume": float(k["volume"])} for k in rows]
+
+    def _p_bingx_swap(self, sym: str) -> float:
+        kl = self._k_bingx_swap(sym, "1m", 2)
+        if not kl:
+            raise ValueError("no symbol")
+        return float(kl[-1]["close"])
+
+    # ---------- BingX spot (LAST RESORT — label: bingx_spot) ----------
+
+    def _k_bingx_spot(self, sym: str, interval: str, limit: int) -> list:
+        j = self._get(f"{BINGX}/openApi/spot/v1/market/kline",
+                      {"symbol": _dash(sym), "interval": interval, "limit": min(limit, 1440)})
+        rows = j.get("data") or []
+        if not rows:
+            raise ValueError("no symbol")
+        # [time(ms), o,h,l,c, vol, ...]
+        return [{"timestamp": float(k[0]), "open": float(k[1]), "high": float(k[2]),
+                 "low": float(k[3]), "close": float(k[4]), "volume": float(k[5])} for k in rows]
+
+    def _p_bingx_spot(self, sym: str) -> float:
+        kl = self._k_bingx_spot(sym, "1m", 2)
+        if not kl:
+            raise ValueError("no symbol")
+        return float(kl[-1]["close"])
