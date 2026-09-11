@@ -138,8 +138,10 @@ class ScanTools:
         if key in ("min_confidence", "tf_min_confidence", "min_agreeing_strategies",
                    "cooldown_minutes"):
             self.settings[key] = int(float(val))
-        elif key in ("timeframes", "symbol"):
-            self.settings[key] = val
+        elif key in ("timeframes", "symbol", "alignment_mode"):
+            if key == "alignment_mode" and val.lower() not in ("strict", "loose"):
+                return "alignment_mode: strict ya loose"
+            self.settings[key] = val.lower() if key == "alignment_mode" else val
         else:
             return f"Unknown setting: {key} (timeframes, min_confidence, tf_min_confidence, min_agreeing_strategies, cooldown_minutes)"
         self._save()

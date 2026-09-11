@@ -177,9 +177,9 @@ def handle_command(text: str) -> str:
         lines = ["=== Settings (mesle XT, ba chat avaz mishe) ==="]
         for k in ("symbol", "timeframes", "min_confidence", "tf_min_confidence",
                   "min_agreeing_strategies", "cooldown_minutes",
-                  "scan_interval_sec", "report_interval_sec"):
+                  "scan_interval_sec", "report_interval_sec", "alignment_mode"):
             lines.append(f"{k} = {settings.get(k)}")
-        lines.append("Mesal: /symbol saga_usdt | /minconf 80 | /agree 2")
+        lines.append("Mesal: /symbol storj_usdt | /minconf 60 | /agree 2 | /align loose")
         return "\n".join(lines)
     if cmd == "timeframes" and arg:
         settings["timeframes"] = arg
@@ -217,6 +217,14 @@ def handle_command(text: str) -> str:
         scanner.settings.update(settings)
         v = settings["report_interval_sec"]
         return f"report: {'har ' + str(v) + 's gozaresh kamel' if v else 'OFF (faghat ALIGNED)'}"
+    if cmd == "align" and arg:
+        v = arg.strip().lower()
+        if v not in ("strict", "loose"):
+            return "align: strict (mesle XT) ya loose (TF ham-jahat nesf vazn)"
+        settings["alignment_mode"] = v
+        save_settings()
+        scanner.settings.update(settings)
+        return f"alignment: {v}"
     if cmd == "agent" and arg:
         if not agent:
             return "Brain OFF — AI_API_KEY ro tu .env bezar."
@@ -243,6 +251,7 @@ def tg_set_commands():
         ("cooldown", "Set cooldown (daghighe)"),
         ("interval", "Set scan interval (sanie)"),
         ("report", "Gozaresh kamel periodic (0=off)"),
+        ("align", "strict=XT / loose=pump-friendly"),
     ]
     try:
         requests.post(f"https://api.telegram.org/bot{token}/setMyCommands",

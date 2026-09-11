@@ -20,6 +20,7 @@ DEFAULTS = {
     "cooldown_minutes": int(_get("COOLDOWN_MINUTES", "15")),
     "scan_interval_sec": int(_get("SCAN_INTERVAL_SEC", "60")),
     "report_interval_sec": int(_get("REPORT_INTERVAL_SEC", "0")),
+    "alignment_mode": _get("ALIGNMENT_MODE", "strict"),
 }
 
 TELEGRAM_BOT_TOKEN = _get("TELEGRAM_BOT_TOKEN", "")

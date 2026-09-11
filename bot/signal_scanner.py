@@ -119,6 +119,22 @@ class SignalScanner:
             total_w = sum(TF_WEIGHTS.get(t, 1.0) for t in intervals)
             aligned_w = sum(TF_WEIGHTS.get(t, 1.0) for t, r in all_results.items()
                             if r.get("direction") == overall)
+            if (str(self.settings.get("alignment_mode", "strict")).lower() == "loose"
+                    and overall != "NEUTRAL"):
+                # TF e NEUTRAL vali ham-jahat (lean) nesf vazn migire.
+                # Mesal 15m ke MOMENTUM LONG dare vali tak-strategy block شده.
+                gate = int(self.settings.get("tf_min_confidence", 70))
+                for t, r in all_results.items():
+                    if r.get("direction") != "NEUTRAL" or r.get("error"):
+                        continue
+                    l_score = sum(s["confidence"] for s in r.get("all_signals", [])
+                                  if s["direction"] == "LONG" and s["confidence"] >= gate)
+                    s_score = sum(s["confidence"] for s in r.get("all_signals", [])
+                                  if s["direction"] == "SHORT" and s["confidence"] >= gate)
+                    lean = ("LONG" if l_score > s_score else
+                            "SHORT" if s_score > l_score else None)
+                    if lean == overall:
+                        aligned_w += TF_WEIGHTS.get(t, 1.0) * 0.5
             alignment = aligned_w / total_w if total_w else 0.0
             win_conf = winner / voted_w if voted_w else 0.0
             conf = int(alignment * (60 + 40 * win_conf))
