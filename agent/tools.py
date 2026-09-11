@@ -108,7 +108,7 @@ class ScanTools:
         sym = normalize_symbol(args.get("symbol", ""))
         ok, src, price = self.client.validate(sym)
         if not ok:
-            return f"{args.get('symbol')} peyda nashod (Binance/Bybit)."
+            return f"{args.get('symbol')} tu hich source nist (Binance/Bybit/MEXC/Gate/OKX/KuCoin/Bitget)."
         self.settings["symbol"] = sym
         self._save()
         self.scanner.settings.update(self.settings)

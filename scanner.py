@@ -122,7 +122,7 @@ def handle_command(text: str) -> str:
         sym = normalize_symbol(arg)
         ok, src, price = client.validate(sym)
         if not ok:
-            return f"{arg} peyda nashod (Binance/Bybit). Mesal: BTC, saga_usdt, ETH"
+            return f"{arg} tu hich source peyda nashod (Binance/Bybit/MEXC/Gate/OKX/KuCoin/Bitget). Mesal: BTC, saga_usdt, ETH"
         settings["symbol"] = sym
         save_settings()
         scanner.settings.update(settings)
