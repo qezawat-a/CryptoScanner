@@ -26,7 +26,7 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {
          "symbol": {"type": "string", "description": "new symbol"}}}, "required": ["symbol"]},
     {"name": "set_setting",
-     "description": "Tanzim: timeframes, min_confidence, tf_min_confidence, min_agreeing_strategies, cooldown_minutes, scan_interval_sec.",
+     "description": "Tanzim (alias ham ghabul: minconf, tfmin, agree, cooldown, interval). Canonical: timeframes, min_confidence, tf_min_confidence, min_agreeing_strategies, cooldown_minutes, scan_interval_sec.",
      "parameters": {"type": "object", "properties": {
          "key": {"type": "string"}, "value": {"type": "string"}}}, "required": ["key", "value"]},
     {"name": "remember",
@@ -105,8 +105,20 @@ class ScanTools:
         self.scanner.settings.update(self.settings)
         return f"Symbol: {to_display(sym)} ({src}) @ {price}"
 
+    KEY_ALIASES = {
+        "minconf": "min_confidence", "min_conf": "min_confidence",
+        "tfmin": "tf_min_confidence", "tf_min": "tf_min_confidence",
+        "agree": "min_agreeing_strategies", "min_agree": "min_agreeing_strategies",
+        "min_agreeing": "min_agreeing_strategies",
+        "cooldown": "cooldown_minutes",
+        "interval": "scan_interval_sec", "scan_interval": "scan_interval_sec",
+        "report": "report_interval_sec", "report_interval": "report_interval_sec",
+        "tfs": "timeframes", "tf": "timeframes",
+    }
+
     def _setting(self, args: dict) -> str:
-        key, val = (args.get("key") or "").strip(), (args.get("value") or "").strip()
+        key, val = (args.get("key") or "").strip().lower(), (args.get("value") or "").strip()
+        key = self.KEY_ALIASES.get(key, key)
         if key in ("min_confidence", "tf_min_confidence", "min_agreeing_strategies",
                    "cooldown_minutes", "scan_interval_sec", "report_interval_sec"):
             self.settings[key] = int(float(val))
