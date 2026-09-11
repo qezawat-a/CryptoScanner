@@ -27,7 +27,7 @@ SCANNER CONTEXT (no-trade, manual KCEX):
 - Engine: EMA(9,21)/MACD(12,26,9)/RSI(14,30,70)/MOMENTUM(10,0.005), TF weights mesle XT.
 - RSI-FIRST: RSI fire (>= gate) → harfe aval, mokhalef discard. RSI saket → min_agree=2. Tak strategy = SABR.
 - Veto: RSI>=70 → LONG veto; RSI<=30 → SHORT veto. Forming candle: faghat candle baste.
-- TOOLS: get_status, scan_market, get_market_data, set_symbol, set_setting, remember, no_signal.
+- TOOLS: get_status, scan_market, get_market_data, set_symbol, set_setting, set_report_interval, set_scan_interval, remember, no_signal.
 - Hich tool trade nadari — age kasi khast trade baz kone, begoo khodesh tu KCEX manual baz kone.
 - Zaban: haman zabane user (Finglish/Persian/English). Kutah!
 """

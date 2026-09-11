@@ -26,9 +26,17 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {
          "symbol": {"type": "string", "description": "new symbol"}}}, "required": ["symbol"]},
     {"name": "set_setting",
-     "description": "Tanzim (alias: minconf, tfmin, agree, cooldown, interval, report). MOHEM - 2 interval fargh daran: scan_interval_sec = har chand saniye scan run shevad (SILENT, faghat ALIGNED alert). report_interval_sec = gozaresh KAMEL har N saniye ferestade shavad hatta bedune signal (0 = faghat ALIGNED). 'report interval'/'send reports'/'show me scans'/'bebinim chi mige' => report_interval_sec. 'scan interval'/'scan frequency'/'faster scan' => scan_interval_sec. HARGEZ een 2 ta ro ghati nakon!",
+     "description": "Tanzim: timeframes, min_confidence, tf_min_confidence, min_agreeing_strategies, cooldown_minutes. INTERVAL HA INJA NIST — report=set_report_interval, scan=set_scan_interval.",
      "parameters": {"type": "object", "properties": {
          "key": {"type": "string"}, "value": {"type": "string"}}}, "required": ["key", "value"]},
+    {"name": "set_report_interval",
+     "description": "Gozaresh KAMEL har N saniye be user, hatta bedune signal. Vaghti user mige 'report interval'/'send reports'/'show scans'/'bebinim chi mige' IN RA bezan. 0=off.",
+     "parameters": {"type": "object", "properties": {
+         "seconds": {"type": "string"}}}, "required": ["seconds"]},
+    {"name": "set_scan_interval",
+     "description": "Har chand saniye scanner dar background run shavad (SILENT, faghat ALIGNED). Vaghti user mige 'scan interval'/'scan frequency' IN RA bezan. Min 15.",
+     "parameters": {"type": "object", "properties": {
+         "seconds": {"type": "string"}}}, "required": ["seconds"]},
     {"name": "remember",
      "description": "Zakhire dars dar hafeze (observation, lesson).",
      "parameters": {"type": "object", "properties": {
@@ -39,7 +47,7 @@ TOOLS = [
          "reason": {"type": "string"}}}, "required": ["reason"]},
 ]
 
-TOOLS_AUTO = [t for t in TOOLS if t["name"] not in ("set_symbol", "set_setting")]
+TOOLS_AUTO = [t for t in TOOLS if t["name"] not in ("set_symbol", "set_setting", "set_report_interval", "set_scan_interval")]
 
 
 class ScanTools:
@@ -52,12 +60,13 @@ class ScanTools:
         self.decisions = []
 
     def execute(self, name: str, args: dict, allow_settings: bool = True) -> str:
-        if not allow_settings and name in ("set_symbol", "set_setting"):
+        if not allow_settings and name in ("set_symbol", "set_setting", "set_report_interval", "set_scan_interval"):
             return (f"Tool {name} dar autonomous mode بسته: symbol/settings faghat "
                     f"ba dastoor mostaghim user (chat) avaz mishe.")
         h = {"get_status": self._status, "scan_market": self._scan,
              "get_market_data": self._mdata, "set_symbol": self._symbol,
              "set_setting": self._setting, "remember": self._remember,
+             "set_report_interval": self._report_iv, "set_scan_interval": self._scan_iv,
              "no_signal": self._no_signal}.get(name)
         if not h:
             return f"Unknown tool: {name}"
@@ -119,16 +128,42 @@ class ScanTools:
     def _setting(self, args: dict) -> str:
         key, val = (args.get("key") or "").strip().lower(), (args.get("value") or "").strip()
         key = self.KEY_ALIASES.get(key, key)
+        if key in ("scan_interval_sec", "report_interval_sec"):
+            return (f"STOP: interval ha ba set_setting set NEMISHAN. "
+                    f"Baraye report => set_report_interval, baraye scan => set_scan_interval bezan.")
         if key in ("min_confidence", "tf_min_confidence", "min_agreeing_strategies",
-                   "cooldown_minutes", "scan_interval_sec", "report_interval_sec"):
+                   "cooldown_minutes"):
             self.settings[key] = int(float(val))
         elif key in ("timeframes", "symbol"):
             self.settings[key] = val
         else:
-            return f"Unknown setting: {key} (timeframes, min_confidence, tf_min_confidence, min_agreeing_strategies, cooldown_minutes, scan_interval_sec)"
+            return f"Unknown setting: {key} (timeframes, min_confidence, tf_min_confidence, min_agreeing_strategies, cooldown_minutes)"
         self._save()
         self.scanner.settings.update(self.settings)
         return f"{key} = {val}"
+
+    def _report_iv(self, args: dict) -> str:
+        try:
+            v = max(0, int(float(args.get("seconds", 0))))
+        except (TypeError, ValueError):
+            return "seconds adad nist"
+        self.settings["report_interval_sec"] = v
+        self._save()
+        self.scanner.settings.update(self.settings)
+        return (f"report_interval_sec = {v} "
+                f"({'har ' + str(v) + 's gozaresh KAMEL' if v else 'OFF, faghat ALIGNED'} | "
+                f"scan_interval_sec = {self.settings.get('scan_interval_sec')})")
+
+    def _scan_iv(self, args: dict) -> str:
+        try:
+            v = max(15, int(float(args.get("seconds", 60))))
+        except (TypeError, ValueError):
+            return "seconds adad nist"
+        self.settings["scan_interval_sec"] = v
+        self._save()
+        self.scanner.settings.update(self.settings)
+        return (f"scan_interval_sec = {v} (SILENT | "
+                f"report_interval_sec = {self.settings.get('report_interval_sec')})")
 
     def _remember(self, args: dict) -> str:
         self.notes.append({"t": time.time(), "k": args.get("key"), "v": args.get("value")})
