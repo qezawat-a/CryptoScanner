@@ -320,7 +320,8 @@ def scan_loop():
                                 verdict = agent.confirm_signal(report, sym)
                                 logger.info(f"LLM verdict: {verdict[:200]}")
                             except Exception as e:
-                                verdict = f"CONFIRM: (verdict error: {e})"
+                                verdict = f"REJECT: LLM error, safety reject — {e}"
+
                             if verdict.strip().upper().startswith("REJECT"):
                                 logger.info(f"ALIGNED rejected by LLM {sym} {direction}")
                                 if db:
