@@ -1,23 +1,18 @@
 """CryptoScanner — scanner e sarasari (Binance/Bybit), bedune trade, bedune XT.
-
 - Tak symbol dar har lahze (ba /symbol avaz mishe, mesle XT)
 - Haman strategy/logic e XT (EMA/MACD/RSI/MOMENTUM + RSI-first + min_agree + veto)
 - Faghat vaghti ALIGNED (direction + conf >= min) Telegram mide → khodet tu KCEX baz mikoni
 - Hich order, hich API key e sarafi lazem nist
-
 Run:  python3 scanner.py
 Env:  TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID, SCAN_SYMBOL (optional)
 """
-
 import json
 import logging
 import os
 import sys
 import threading
 import time
-
 import requests
-
 import config
 from bot.market_client import MarketClient, normalize_symbol, to_display
 from bot.signal_scanner import SignalScanner
@@ -37,7 +32,6 @@ if os.path.exists(SETTINGS_PATH):
             settings.update(json.load(f))
     except Exception as e:
         logger.warning(f"settings.json khande nashod: {e}")
-
 
 INT_SETTINGS = ("min_confidence", "tf_min_confidence", "min_agreeing_strategies",
                 "cooldown_minutes", "scan_interval_sec", "report_interval_sec")
@@ -96,9 +90,7 @@ last_alert = {}  # symbol -> (direction, timestamp)
 last_report = 0.0
 stop = threading.Event()
 
-
 # ---------- telegram ----------
-
 def tg_send(text: str):
     token = config.TELEGRAM_BOT_TOKEN
     uid = config.TELEGRAM_USER_ID
@@ -145,6 +137,7 @@ def handle_command(text: str) -> str:
                 "/cooldown 15 (daghighe) | /interval 60 (sanie)\n"
                 "/report 60 — ersal gozaresh kamel har 60s (0 = faghat ALIGNED)\n"
                 "Ya mostaghim chat kon — agent javab mide.")
+
     if cmd == "symbol" and arg:
         sym = normalize_symbol(arg)
         ok, src, price = client.validate(sym)
@@ -154,10 +147,12 @@ def handle_command(text: str) -> str:
         save_settings()
         scanner.settings.update(settings)
         return f"Symbol: {to_display(sym)} ({src}) @ {price}"
+
     if cmd == "scan":
         sym = normalize_symbol(settings.get("symbol", "BTCUSDT"))
         res = scanner.scan_multi_timeframe(sym)
         return scanner.format_report(res)
+
     if cmd == "history":
         if not db:
             return "DB OFF — history nist."
@@ -171,8 +166,10 @@ def handle_command(text: str) -> str:
             flag = "❌REJECT " if r["rejected"] else "🚨"
             lines.append(f"{flag}{t} {r['symbol']} {r['direction']} {r['confidence']}% @ {r['price']} ({r['source']})")
         return "\n".join(lines)
+
     if cmd == "status":
         return cmd_status()
+
     if cmd == "settings":
         lines = ["=== Settings (mesle XT, ba chat avaz mishe) ==="]
         for k in ("symbol", "timeframes", "min_confidence", "tf_min_confidence",
@@ -181,42 +178,50 @@ def handle_command(text: str) -> str:
             lines.append(f"{k} = {settings.get(k)}")
         lines.append("Mesal: /symbol storj_usdt | /minconf 60 | /agree 2 | /align loose")
         return "\n".join(lines)
+
     if cmd == "timeframes" and arg:
         settings["timeframes"] = arg
         save_settings()
         scanner.settings.update(settings)
         return f"Timeframes: {arg}"
+
     if cmd in ("minconf", "min_confidence") and arg:
         settings["min_confidence"] = int(arg)
         save_settings()
         scanner.settings.update(settings)
         return f"min_confidence: {arg}%"
+
     if cmd in ("tfmin", "tf_min_confidence") and arg:
         settings["tf_min_confidence"] = int(arg)
         save_settings()
         scanner.settings.update(settings)
         return f"tf_min_confidence: {arg}%"
+
     if cmd in ("agree", "min_agree") and arg:
         settings["min_agreeing_strategies"] = int(arg)
         save_settings()
         scanner.settings.update(settings)
         return f"min_agree: {arg}"
+
     if cmd == "cooldown" and arg:
         settings["cooldown_minutes"] = int(arg)
         save_settings()
         scanner.settings.update(settings)
         return f"cooldown: {arg}m"
+
     if cmd == "interval" and arg:
         settings["scan_interval_sec"] = max(15, int(arg))
         save_settings()
         scanner.settings.update(settings)
         return f"scan interval: {settings['scan_interval_sec']}s"
+
     if cmd == "report" and arg:
         settings["report_interval_sec"] = max(0, int(arg))
         save_settings()
         scanner.settings.update(settings)
         v = settings["report_interval_sec"]
         return f"report: {'har ' + str(v) + 's gozaresh kamel' if v else 'OFF (faghat ALIGNED)'}"
+
     if cmd == "align" and arg:
         v = arg.strip().lower()
         if v not in ("strict", "loose"):
@@ -225,10 +230,12 @@ def handle_command(text: str) -> str:
         save_settings()
         scanner.settings.update(settings)
         return f"alignment: {v}"
+
     if cmd == "agent" and arg:
         if not agent:
             return "Brain OFF — AI_API_KEY ro tu .env bezar."
         return agent.chat(arg)
+
     return ""
 
 
@@ -295,7 +302,6 @@ def telegram_poll():
 
 
 # ---------- scan loop ----------
-
 def scan_loop():
     global last_report
     while not stop.is_set():
@@ -309,10 +315,9 @@ def scan_loop():
                 cd_min = int(settings.get("cooldown_minutes", 15))
                 cd_key = (sym, direction)
                 if now - cooldowns.get(cd_key, 0) >= cd_min * 60:
-    prev = last_alert.get(sym)
-    dup_window = max(30, cd_min * 30)  # dynamic: half of cooldown, min 30s
-    if not (prev and prev[0] == direction and now - prev[1] < dup_window):
-
+                    prev = last_alert.get(sym)
+                    dup_window = max(30, cd_min * 30)
+                    if not (prev and prev[0] == direction and now - prev[1] < dup_window):
                         report = scanner.format_report(res)
                         verdict = ""
                         if agent and config.Config.AGENT_LLM_CONFIRM == "true":
@@ -321,7 +326,6 @@ def scan_loop():
                                 logger.info(f"LLM verdict: {verdict[:200]}")
                             except Exception as e:
                                 verdict = f"REJECT: LLM error, safety reject — {e}"
-
                             if verdict.strip().upper().startswith("REJECT"):
                                 logger.info(f"ALIGNED rejected by LLM {sym} {direction}")
                                 if db:
@@ -353,8 +357,10 @@ def scan_loop():
             if rep_iv > 0 and now - last_report >= rep_iv:
                 last_report = now
                 tg_send("📊 " + scanner.format_report(res))
+
         except Exception as e:
             logger.error(f"scan error: {e}", exc_info=True)
+
         stop.wait(max(15, int(settings.get("scan_interval_sec", 60))))
 
 
@@ -362,15 +368,18 @@ def main():
     if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_USER_ID:
         logger.warning("TELEGRAM_BOT_TOKEN/USER_ID nist — alert ha faghat tu log mian.")
         logger.warning("Behtar bot JADID besazi (bot e XT focusedه, 2 polling conflict mikonan).")
+
     sym = normalize_symbol(settings.get("symbol", "BTCUSDT"))
     ok, src, price = client.validate(sym)
     logger.info(f"Scanner start: {to_display(sym)} ok={ok} {src} @ {price}")
     logger.info(cmd_status())
+
     tg_send("✅ Scanner روشن شد (no-trade)\n" + cmd_status())
     tg_set_commands()
 
     t1 = threading.Thread(target=telegram_poll, daemon=True)
     t1.start()
+
     try:
         scan_loop()
     except KeyboardInterrupt:
