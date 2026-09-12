@@ -7,7 +7,7 @@ FIXES APPLIED:
   1. RSI extreme HARD OVERRIDE: RSI>=70 → force SHORT (even if no other strat agrees)
                                RSI<=30 → force LONG  (even if no other strat agrees)
   2. avg_confidence now only averages the WINNING side (no cross-contamination)
-  3. Removed dead-code veto block (redundant with the extreme-clearing above)
+  3. RSIStrategy ALWAYS returns RSI value in details (visible in reports even when neutral)
   4. Recompute scores AFTER rsi_vote clears opposing side (correct math)
 """
 from typing import List, Dict, Tuple
@@ -114,19 +114,22 @@ class RSIStrategy:
             return "NEUTRAL", 0, {}
         r = _rsi_wilder_ewm(closes, self.period)
         prev_rsi, curr_rsi = r[-2], r[-1]
+        # Always return current RSI value for visibility and override logic
+        details = {"rsi": curr_rsi}
+
         if prev_rsi < self.oversold and curr_rsi > self.oversold:
             strength = min(100, (curr_rsi - self.oversold) * 2)
-            return "LONG", min(90, int(60 + strength * 1.5)), {"rsi": curr_rsi}
+            return "LONG", min(90, int(60 + strength * 1.5)), details
         if prev_rsi > self.overbought and curr_rsi < self.overbought:
             strength = min(100, (self.overbought - curr_rsi) * 2)
-            return "SHORT", min(90, int(60 + strength * 1.5)), {"rsi": curr_rsi}
+            return "SHORT", min(90, int(60 + strength * 1.5)), details
         if curr_rsi < self.oversold:
             strength = min(100, (self.oversold - curr_rsi) * 2)
-            return "LONG", min(90, int(60 + strength * 1.5)) - 10, {"rsi": curr_rsi}
+            return "LONG", min(90, int(60 + strength * 1.5)) - 10, details
         if curr_rsi > self.overbought:
             strength = min(100, (curr_rsi - self.overbought) * 2)
-            return "SHORT", min(90, int(60 + strength * 1.5)) - 10, {"rsi": curr_rsi}
-        return "NEUTRAL", 0, {}
+            return "SHORT", min(90, int(60 + strength * 1.5)) - 10, details
+        return "NEUTRAL", 0, details  # RSI value still returned even when neutral!
 
 
 class MomentumStrategy:
