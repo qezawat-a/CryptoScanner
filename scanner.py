@@ -309,8 +309,10 @@ def scan_loop():
                 cd_min = int(settings.get("cooldown_minutes", 15))
                 cd_key = (sym, direction)
                 if now - cooldowns.get(cd_key, 0) >= cd_min * 60:
-                    prev = last_alert.get(sym)
-                    if not (prev and prev[0] == direction and now - prev[1] < 120):
+    prev = last_alert.get(sym)
+    dup_window = max(30, cd_min * 30)  # dynamic: half of cooldown, min 30s
+    if not (prev and prev[0] == direction and now - prev[1] < dup_window):
+
                         report = scanner.format_report(res)
                         verdict = ""
                         if agent and config.Config.AGENT_LLM_CONFIRM == "true":
