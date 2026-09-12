@@ -1,10 +1,15 @@
 """Pure-python strategy engine — port daghigh az CryptoMind-XT/bot/strategies.py.
-
 Hich pandas nadare (sabok baraye Termux/Railway). Logic, param ha,
 formula haye confidence, RSI veto, RSI-first, min_agree — hame mesle XT.
 Tanhā farq: ewm/rolling ba حلقه pure-python (mesle pandas adjust=False).
-"""
 
+FIXES APPLIED:
+  1. RSI extreme HARD OVERRIDE: RSI>=70 → force SHORT (even if no other strat agrees)
+                               RSI<=30 → force LONG  (even if no other strat agrees)
+  2. avg_confidence now only averages the WINNING side (no cross-contamination)
+  3. Removed dead-code veto block (redundant with the extreme-clearing above)
+  4. Recompute scores AFTER rsi_vote clears opposing side (correct math)
+"""
 from typing import List, Dict, Tuple
 
 
@@ -156,7 +161,12 @@ class MomentumStrategy:
 
 
 class StrategyEngine:
-    """Mesle XT: RSI veto + RSI-first + min_agree + confidence mass vote."""
+    """Mesle XT: RSI veto + RSI-first + min_agree + confidence mass vote.
+
+    FIX: RSI extreme now ACTIVELY forces the opposite direction (not just passive clear).
+         When RSI>=70 and nothing else fires SHORT → engine forces SHORT.
+         When RSI<=30 and nothing else fires LONG  → engine forces LONG.
+    """
 
     def __init__(self):
         self.ema = EMAStrategy()
@@ -179,25 +189,28 @@ class StrategyEngine:
     def get_consensus(self, closes: List[float], volumes: List[float],
                       min_confidence: int = 80, min_agree: int = 2) -> dict:
         results = self.calculate_all(closes, volumes)
-        long_signals = [r for r in results if r["direction"] == "LONG" and r["confidence"] >= min_confidence]
-        short_signals = [r for r in results if r["direction"] == "SHORT" and r["confidence"] >= min_confidence]
 
+        # ---- Step 1: filter signals by confidence gate ----
+        long_signals = [r for r in results
+                        if r["direction"] == "LONG" and r["confidence"] >= min_confidence]
+        short_signals = [r for r in results
+                         if r["direction"] == "SHORT" and r["confidence"] >= min_confidence]
+
+        # ---- Step 2: RSI extreme → clear opposing + set hard override ----
         rsi_entry = next((r for r in results if r["strategy"] == "RSI"), None)
         rsi_val = None
+        rsi_extreme_override = None
+
         if rsi_entry and rsi_entry.get("details", {}).get("rsi") is not None:
             rsi_val = float(rsi_entry["details"]["rsi"])
             if rsi_val >= 70:
                 long_signals = []
+                rsi_extreme_override = "SHORT"   # RSI overbought → force SHORT
             if rsi_val <= 30:
                 short_signals = []
+                rsi_extreme_override = "LONG"    # RSI oversold → force LONG
 
-        direction = "NEUTRAL"
-        signal_strength = 0.0
-        strategies_used: List[str] = []
-        long_score = sum(r["confidence"] for r in long_signals)
-        short_score = sum(r["confidence"] for r in short_signals)
-        total_score = long_score + short_score
-
+        # ---- Step 3: RSI-first vote (if RSI itself fired above gate) ----
         rsi_vote = None
         if (rsi_entry and rsi_entry.get("direction") in ("LONG", "SHORT")
                 and rsi_entry.get("confidence", 0) >= min_confidence):
@@ -206,6 +219,17 @@ class StrategyEngine:
                 short_signals = []
             else:
                 long_signals = []
+
+        # ---- Step 4: compute scores AFTER all clearing ----
+        long_score = sum(r["confidence"] for r in long_signals)
+        short_score = sum(r["confidence"] for r in short_signals)
+        total_score = long_score + short_score
+
+        # ---- Step 5: decide direction ----
+        direction = "NEUTRAL"
+        signal_strength = 0.0
+        strategies_used: List[str] = []
+        veto_reason = None
 
         if rsi_vote == "LONG" and long_signals:
             direction = "LONG"
@@ -221,22 +245,32 @@ class StrategyEngine:
                 direction = "SHORT"
                 strategies_used = [r["strategy"] for r in short_signals]
 
+        # ---- Step 6: RSI EXTREME HARD OVERRIDE ----
+        # If RSI is in extreme zone and consensus is still NEUTRAL,
+        # FORCE the opposite direction — RSI is king.
+        if rsi_extreme_override and direction == "NEUTRAL":
+            direction = rsi_extreme_override
+            strategies_used = ["RSI_EXTREME"]
+            deviation = abs(rsi_val - 50)
+            veto_reason = f"RSI {rsi_val:.1f} extreme → forced {direction}"
+
+        # ---- Step 7: signal strength ----
         if direction != "NEUTRAL" and total_score > 0:
             signal_strength = abs(long_score - short_score) / total_score
+        elif rsi_extreme_override:
+            # Base strength for RSI-extreme-only override
+            signal_strength = 0.6
 
+        # ---- Step 8: avg confidence — WINNING SIDE ONLY ----
         avg_confidence = 0
-        if long_signals or short_signals:
-            all_s = long_signals + short_signals
-            avg_confidence = int(sum(r["confidence"] for r in all_s) / len(all_s))
-
-        veto_reason = None
-        if rsi_val is not None:
-            if rsi_val >= 70 and direction == "LONG":
-                veto_reason = f"RSI {rsi_val:.1f} overbought - LONG vetoed"
-                direction = "NEUTRAL"
-            elif rsi_val <= 30 and direction == "SHORT":
-                veto_reason = f"RSI {rsi_val:.1f} oversold - SHORT vetoed"
-                direction = "NEUTRAL"
+        if direction == "LONG" and long_signals:
+            avg_confidence = int(sum(r["confidence"] for r in long_signals) / len(long_signals))
+        elif direction == "SHORT" and short_signals:
+            avg_confidence = int(sum(r["confidence"] for r in short_signals) / len(short_signals))
+        elif rsi_extreme_override and rsi_val is not None:
+            # Confidence based on how far RSI is from neutral (50)
+            deviation = abs(rsi_val - 50)
+            avg_confidence = min(95, int(60 + deviation * 0.8))
 
         return {
             "direction": direction,
