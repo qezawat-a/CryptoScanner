@@ -139,6 +139,36 @@ class SignalScanner:
             win_conf = winner / voted_w if voted_w else 0.0
             conf = int(alignment * (60 + 40 * win_conf))
 
+        # RSI-FORCE (user principle): any timeframe with an
+        # extreme RSI forces the OVERALL direction.
+        # Among opposing extremes the winner is max(TF_weight * |rsi-50|).
+        # Confidence stays HONEST so the 80 gate still protects entries.
+        rsi_force = None
+        cands = []
+        for tf, r in all_results.items():
+            if r.get("direction") not in ("LONG", "SHORT"):
+                continue
+            sigs = r.get("all_signals", []) or []
+            rsi_sig = next((s for s in sigs if s.get("strategy") == "RSI"), None)
+            det = (rsi_sig.get("details", {}) or {}) if rsi_sig else {}
+            if rsi_sig and rsi_sig.get("direction") == r["direction"] and det.get("rsi") is not None:
+                rv = float(det["rsi"])
+                cands.append((TF_WEIGHTS.get(tf, 1.0) * abs(rv - 50), tf, rv, r["direction"]))
+        if cands:
+            _, ftf, frsi, fside = max(cands)
+            if overall != fside:
+                prev = overall
+                overall = fside
+                total_w = sum(TF_WEIGHTS.get(t, 1.0) for t in intervals)
+                aligned_w = sum(TF_WEIGHTS.get(t, 1.0) for t, r in all_results.items()
+                                if r.get("direction") == fside)
+                fw = short_weight if fside == "SHORT" else long_weight
+                ow = long_weight if fside == "SHORT" else short_weight
+                win_conf = fw / voted_w if voted_w else 0.0
+                conf = int((aligned_w / total_w) * (60 + 40 * win_conf)) if total_w else 0
+                strength = (fw - ow) / voted_w if voted_w else 0.0
+                rsi_force = (f"{ftf} RSI {frsi:.1f} {fside} overrules MTF (was {prev})")
+
         price = self.client.get_price(symbol)
         return {
             "direction": overall, "confidence": conf,
@@ -148,6 +178,7 @@ class SignalScanner:
             "voted_weight": voted_w, "price": price, "symbol": symbol,
             "timestamp": time.time(), "min_conf": min_conf,
             "source": self.client.last_source(symbol),
+            "rsi_force": rsi_force,
         }
 
     def is_aligned(self, result: dict) -> bool:
@@ -160,8 +191,10 @@ class SignalScanner:
         if self.is_aligned(result):
             return (f"ALIGNED {result['direction']} {result['confidence']}% — "
                     f"signal motabar (balaye had {min_conf}%)")
+        if result.get("rsi_force"):
+            return f"FORCE — {result['rsi_force']} (conf {result['confidence']}% < had {min_conf}%)"
         vetoes = [r.get("veto_reason") for r in result.get("timeframe_results", {}).values()
-                  if r.get("veto_reason")]
+                   if r.get("veto_reason")]
         if vetoes:
             return f"SABR — veto: {vetoes[0]}"
         if result["direction"] != "NEUTRAL":
@@ -176,38 +209,103 @@ class SignalScanner:
             return "SABR — signal ha tak‌تک و parakande‌ست (min_agree nashod)"
         return "SABR — hich signal e motabari nist"
 
+    def _lean_token(self, s: dict, counted: set) -> str:
+        name = s.get("strategy", "?")
+        det = s.get("details", {}) or {}
+        mark = "*" if s.get("direction") in ("LONG", "SHORT") and name in counted else ""
+        if name == "RSI" and det.get("rsi") is not None:
+            lean = det.get("lean")
+            lc = det.get("lean_conf", 0) or 0
+            if lean and lean != "NEUTRAL":
+                return f"RSI:{det['rsi']:.1f} {lean}({lc}%){mark}"
+            return f"RSI:{det['rsi']:.1f}{mark}"
+        lean = det.get("lean")
+        lc = det.get("lean_conf", 0) or 0
+        if lean and lean != "NEUTRAL":
+            return f"{name}={lean}({lc}%){mark}"
+        if s.get("direction") in ("LONG", "SHORT"):
+            return f"{name}={s['direction']}({s.get('confidence', 0)}%){mark}"
+        if not det:
+            return f"{name}=n/a"
+        return f"{name}=flat"
+
+    def _tf_line(self, tf: str, r: dict, gate: int) -> str:
+        if r.get("error"):
+            return f"  {tf}: no data ({r['error']})"
+        sigs = r.get("all_signals", []) or []
+        counted = set(r.get("strategies_used", []))
+        toks = [self._lean_token(s, counted) for s in sigs]
+        if r.get("direction") != "NEUTRAL":
+            return f"  {tf}: {r['direction']} ({r['confidence']}%) [{' | '.join(toks)}]"
+        leans = [(s.get("details", {}).get("lean_conf", 0) or 0,
+                  s.get("details", {}).get("lean"), s.get("strategy", "?"))
+                 for s in sigs
+                 if (s.get("details", {}) or {}).get("lean") not in (None, "NEUTRAL")]
+        if leans:
+            conf, side, name = max(leans)
+            return f"  {tf}: NEUTRAL (lean {side} {conf}% via {name}) [{' | '.join(toks)}]"
+        return f"  {tf}: NEUTRAL (flat) [{' | '.join(toks)}]"
+
+    def _top_lean(self, tfs: dict):
+        best = None
+        for tf, r in (tfs or {}).items():
+            if r.get("error"):
+                continue
+            if r.get("direction") in ("LONG", "SHORT"):
+                cand = (r.get("confidence", 0), f"{tf} TF vote", r["direction"])
+                if best is None or cand[0] > best[0]:
+                    best = cand
+            for s in r.get("all_signals", []) or []:
+                det = s.get("details", {}) or {}
+                if det.get("lean") not in (None, "NEUTRAL"):
+                    cand = (det.get("lean_conf", 0) or 0, f"{tf} {s.get('strategy','?')}", det["lean"])
+                    if best is None or cand[0] > best[0]:
+                        best = cand
+        return best
+
     def format_report(self, result: dict) -> str:
         sym = result.get("symbol", "?")
-        lines = [f"=== SCAN [{sym}] ({result.get('source', '?')}) ===",
-                 f"Direction: {result['direction']}",
-                 f"Confidence: {result['confidence']}% (min {result.get('min_conf', 80)}%)",
-                 f"Strength: {result.get('signal_strength', 0):.2f}",
-                 f"Price: {result.get('price', 0)}"]
+        lines = [f"=== SCAN [{sym}] ({result.get('source', '?')}) ==="]
+        if result.get("rsi_force"):
+            lines.append(f"FORCE: {result['rsi_force']}")
+        top = self._top_lean(result.get("timeframe_results", {}))
+        if result["direction"] != "NEUTRAL":
+            lines.append(f"Direction: {result['direction']}")
+            lines.append(f"Confidence: {result['confidence']}% (min {result.get('min_conf', 80)}%)")
+            lines.append(f"Strength: {result.get('signal_strength', 0):.2f}")
+        else:
+            if top:
+                lines.append(f"Direction: NEUTRAL (top lean {top[2]} {top[0]}% - {top[1]})")
+            else:
+                lines.append("Direction: NEUTRAL (flat - no lean data)")
+        if result.get("veto_reason"):
+            lines.append(f"VETO: {result['veto_reason']}")
+        lines.append(f"Price: {result.get('price', 0)}")
         if result.get("strategies_used"):
             lines.append(f"Strategies: {', '.join(result['strategies_used'])}")
+        else:
+            gate = int(self.settings.get("tf_min_confidence", 70))
+            lines.append(f"Strategies: none counted (all below {gate}% gate - leans per TF below)")
         gate = int(self.settings.get("tf_min_confidence", 70))
         for tf, r in result.get("timeframe_results", {}).items():
-            if r.get("error"):
-                lines.append(f"  {tf}: no data ({r['error']})")
-                continue
-            fired, below = [], []
-            for s in r.get("all_signals", []):
-                if s["direction"] == "NEUTRAL":
-                    continue
-                e = f"{s['strategy']}={s['direction']}({s['confidence']}%)"
-                (below if s["confidence"] < gate else fired).append(e)
+            lines.append(self._tf_line(tf, r, gate))
+        lw = result.get("long_weight", 0)
+        sw = result.get("short_weight", 0)
+        vw = result.get("voted_weight", 0)
+        if vw > 0:
             parts = []
-            if fired:
-                parts.append("FIRED: " + ", ".join(fired))
-            if below:
-                parts.append(f"IGNORED (zire gate {gate}%, BI ASAR): {', '.join(below)}")
-            lines.append(f"  {tf}: {r['direction']} ({r['confidence']}%) [{(' | '.join(parts)) or 'no fire'}]")
-            if r.get("veto_reason"):
-                lines.append(f"      veto: {r['veto_reason']}")
-            if r.get("rsi") is not None:
-                lines.append(f"      RSI: {r['rsi']:.1f}")
-        lines.append(f"Long: {result.get('long_weight', 0):.2f} | Short: {result.get('short_weight', 0):.2f}")
-        lines.append(f"VERDICT: {self.verdict(result)}")
+            if lw > 0:
+                parts.append(f"Long: {lw:.2f}")
+            else:
+                parts.append("no LONG votes")
+            if sw > 0:
+                parts.append(f"Short: {sw:.2f}")
+            else:
+                parts.append("no SHORT votes")
+            parts.append(f"Voted: {vw:.2f}")
+            lines.append(" | ".join(parts))
+        else:
+            lines.append("No counted votes - every TF below gate (see leans above).")
         if self.is_aligned(result):
             lines.append(f"\n>>> ALIGNED {result['direction']} — baraye KCEX dasti <<<")
         return "\n".join(lines)

@@ -9,8 +9,48 @@ FIXES APPLIED:
   2. avg_confidence now only averages the WINNING side (no cross-contamination)
   3. RSIStrategy ALWAYS returns RSI value in details (visible in reports even when neutral)
   4. Recompute scores AFTER rsi_vote clears opposing side (correct math)
+  5. Always-on lean% for ALL strategies (display even when silent)
+  6. RSI gate exception: RSI always passes conf gate when extreme
+  7. RSI-FIRST vote fires regardless of confidence
 """
 from typing import List, Dict, Tuple
+
+
+def _ema(values: List[float], span: int) -> List[float]:
+    k = 2.0 / (span + 1.0)
+    out = []
+    e = None
+    for v in values:
+        e = v if e is None else v * k + e * (1 - k)
+        out.append(e)
+    return out
+
+
+def _rsi_wilder_ewm(closes: List[float], period: int) -> List[float]:
+    alpha = 1.0 / period
+    avg_gain, avg_loss = 0.0, 0.0
+    rsis = []
+    prev = closes[0]
+    started = False
+    for c in closes:
+        if not started:
+            started = True
+            prev = c
+            rsis.append(50.0)
+            continue
+        delta = c - prev
+        prev = c
+        gain = delta if delta > 0 else 0.0
+        loss = -delta if delta < 0 else 0.0
+        avg_gain = gain * alpha + avg_gain * (1 - alpha)
+        avg_loss = loss * alpha + avg_loss * (1 - alpha)
+        rs = avg_gain / (avg_loss if avg_loss != 0 else 1e-10)
+        rsis.append(100 - (100 / (1 + rs)))
+    return rsis
+
+
+def _lean_info(lean: str, lean_conf: int) -> dict:
+    return {"lean": lean, "lean_conf": lean_conf if lean != "NEUTRAL" else 0}
 
 
 def _ema(values: List[float], span: int) -> List[float]:
@@ -62,13 +102,15 @@ class EMAStrategy:
         es = _ema(closes, self.slow_period)
         prev_diff = ef[-2] - es[-2]
         curr_diff = ef[-1] - es[-1]
+        lean = "LONG" if curr_diff > 0 else ("SHORT" if curr_diff < 0 else "NEUTRAL")
+        lc = 0 if lean == "NEUTRAL" else max(1, min(99, int(min(100, abs(curr_diff) / max(closes[-1], 0.01) * 10000))))
         if prev_diff < 0 and curr_diff > 0:
             strength = min(100, abs(curr_diff) / max(closes[-1], 0.01) * 10000)
-            return "LONG", min(95, int(60 + strength * 2)), {"fast": ef[-1], "slow": es[-1]}
+            return "LONG", min(95, int(60 + strength * 2)), {"fast": ef[-1], "slow": es[-1], **_lean_info("LONG", min(95, int(60 + strength * 2)))}
         if prev_diff > 0 and curr_diff < 0:
             strength = min(100, abs(curr_diff) / max(closes[-1], 0.01) * 10000)
-            return "SHORT", min(95, int(60 + strength * 2)), {"fast": ef[-1], "slow": es[-1]}
-        return "NEUTRAL", 0, {}
+            return "SHORT", min(95, int(60 + strength * 2)), {"fast": ef[-1], "slow": es[-1], **_lean_info("SHORT", min(95, int(60 + strength * 2)))}
+        return "NEUTRAL", 0, _lean_info(lean, lc)
 
 
 class MACDStrategy:
@@ -88,19 +130,24 @@ class MACDStrategy:
         sig = _ema(macd, self.signal_period)
         hist = [m - s for m, s in zip(macd, sig)]
         prev_hist, curr_hist = hist[-2], hist[-1]
+        close_px = abs(closes[-1])
+        lean = "LONG" if curr_hist > 0 else ("SHORT" if curr_hist < 0 else "NEUTRAL")
+        lc = 0 if lean == "NEUTRAL" else max(1, min(99, int(min(100, abs(curr_hist) / close_px * 50000))))
         if curr_hist > 0 and prev_hist < 0:
             strength = min(100, abs(curr_hist) / abs(closes[-1]) * 50000)
-            return "LONG", min(90, int(55 + strength * 0.5)), {"histogram": curr_hist}
+            return "LONG", min(90, int(55 + strength * 0.5)), {"histogram": curr_hist, **_lean_info("LONG", min(90, int(55 + strength * 0.5)))}
         if curr_hist < 0 and prev_hist > 0:
             strength = min(100, abs(curr_hist) / abs(closes[-1]) * 50000)
-            return "SHORT", min(90, int(55 + strength * 0.5)), {"histogram": curr_hist}
+            return "SHORT", min(90, int(55 + strength * 0.5)), {"histogram": curr_hist, **_lean_info("SHORT", min(90, int(55 + strength * 0.5)))}
         if curr_hist > 0 and prev_hist > 0 and macd[-1] > macd[-2]:
             ts = abs(macd[-1]) / abs(closes[-1]) * 10000
-            return "LONG", min(85, int(55 + ts)), {}
+            conf = min(85, int(55 + ts))
+            return "LONG", conf, _lean_info("LONG", conf)
         if curr_hist < 0 and prev_hist < 0 and macd[-1] < macd[-2]:
             ts = abs(macd[-1]) / abs(closes[-1]) * 10000
-            return "SHORT", min(85, int(55 + ts)), {}
-        return "NEUTRAL", 0, {}
+            conf = min(85, int(55 + ts))
+            return "SHORT", conf, _lean_info("SHORT", conf)
+        return "NEUTRAL", 0, _lean_info(lean, lc)
 
 
 class RSIStrategy:
@@ -119,17 +166,23 @@ class RSIStrategy:
 
         if prev_rsi < self.oversold and curr_rsi > self.oversold:
             strength = min(100, (curr_rsi - self.oversold) * 2)
-            return "LONG", min(90, int(60 + strength * 1.5)), details
+            conf = min(90, int(60 + strength * 1.5))
+            return "LONG", conf, {"rsi": curr_rsi, **_lean_info("LONG", conf)}
         if prev_rsi > self.overbought and curr_rsi < self.overbought:
             strength = min(100, (self.overbought - curr_rsi) * 2)
-            return "SHORT", min(90, int(60 + strength * 1.5)), details
+            conf = min(90, int(60 + strength * 1.5))
+            return "SHORT", conf, {"rsi": curr_rsi, **_lean_info("SHORT", conf)}
         if curr_rsi < self.oversold:
             strength = min(100, (self.oversold - curr_rsi) * 2)
-            return "LONG", min(90, int(60 + strength * 1.5)) - 10, details
+            conf = min(90, int(60 + strength * 1.5)) - 10
+            return "LONG", conf, {"rsi": curr_rsi, **_lean_info("LONG", conf)}
         if curr_rsi > self.overbought:
             strength = min(100, (curr_rsi - self.overbought) * 2)
-            return "SHORT", min(90, int(60 + strength * 1.5)) - 10, details
-        return "NEUTRAL", 0, details  # RSI value still returned even when neutral!
+            conf = min(90, int(60 + strength * 1.5)) - 10
+            return "SHORT", conf, {"rsi": curr_rsi, **_lean_info("SHORT", conf)}
+        lean = "LONG" if curr_rsi < 50 else ("SHORT" if curr_rsi > 50 else "NEUTRAL")
+        lc = 0 if lean == "NEUTRAL" else max(1, min(90, int(abs(curr_rsi - 50) * 1.8)))
+        return "NEUTRAL", 0, {"rsi": curr_rsi, **_lean_info(lean, lc)}
 
 
 class MomentumStrategy:
@@ -148,19 +201,25 @@ class MomentumStrategy:
         avg_vol = sum(w) / len(w) if w else 0
         current_vol = volumes[-1]
         vol_surge = current_vol > avg_vol * 1.2 if avg_vol > 0 else False
+        lean = "LONG" if curr_mom > 0 else ("SHORT" if curr_mom < 0 else "NEUTRAL")
+        lc = 0 if lean == "NEUTRAL" else max(1, min(99, int(min(100, abs(curr_mom) * 800))))
         if curr_mom > self.threshold and prev_mom < self.threshold and vol_surge:
             strength = min(100, abs(curr_mom) * 1000)
-            return "LONG", min(90, int(55 + strength * 2)), {"momentum": curr_mom}
+            conf = min(90, int(55 + strength * 2))
+            return "LONG", conf, {"momentum": curr_mom, **_lean_info("LONG", conf)}
         if curr_mom < -self.threshold and prev_mom > -self.threshold and vol_surge:
             strength = min(100, abs(curr_mom) * 1000)
-            return "SHORT", min(90, int(55 + strength * 2)), {"momentum": curr_mom}
+            conf = min(90, int(55 + strength * 2))
+            return "SHORT", conf, {"momentum": curr_mom, **_lean_info("SHORT", conf)}
         if curr_mom > self.threshold:
             strength = min(100, abs(curr_mom) * 800)
-            return "LONG", min(90, int(55 + strength * 2)) - 15, {"momentum": curr_mom}
+            conf = min(90, int(55 + strength * 2)) - 15
+            return "LONG", conf, {"momentum": curr_mom, **_lean_info("LONG", conf)}
         if curr_mom < -self.threshold:
             strength = min(100, abs(curr_mom) * 800)
-            return "SHORT", min(90, int(55 + strength * 2)) - 15, {"momentum": curr_mom}
-        return "NEUTRAL", 0, {}
+            conf = min(90, int(55 + strength * 2)) - 15
+            return "SHORT", conf, {"momentum": curr_mom, **_lean_info("SHORT", conf)}
+        return "NEUTRAL", 0, _lean_info(lean, lc)
 
 
 class StrategyEngine:
@@ -193,42 +252,49 @@ class StrategyEngine:
                       min_confidence: int = 80, min_agree: int = 2) -> dict:
         results = self.calculate_all(closes, volumes)
 
-        # ---- Step 1: filter signals by confidence gate ----
-        long_signals = [r for r in results
-                        if r["direction"] == "LONG" and r["confidence"] >= min_confidence]
-        short_signals = [r for r in results
-                         if r["direction"] == "SHORT" and r["confidence"] >= min_confidence]
-
-        # ---- Step 2: RSI extreme → clear opposing + set hard override ----
+        # ---- Step 1: extract RSI value for veto + later MTF force ----
         rsi_entry = next((r for r in results if r["strategy"] == "RSI"), None)
         rsi_val = None
-        rsi_extreme_override = None
-
         if rsi_entry and rsi_entry.get("details", {}).get("rsi") is not None:
             rsi_val = float(rsi_entry["details"]["rsi"])
+
+        # ---- Step 2: filter signals by confidence gate ----
+        # EXCEPT RSI: when extreme (>=70/<=30) it always passes
+        # the gate so it can veto/force — a mid-zone RSI with conf
+        # below gate stays filtered (it voted nothing).
+        long_signals = [r for r in results
+                        if r["direction"] == "LONG"
+                        and (r["confidence"] >= min_confidence
+                             or (r["strategy"] == "RSI" and rsi_val is not None
+                                 and (rsi_val >= 70 or rsi_val <= 30)))]
+        short_signals = [r for r in results
+                         if r["direction"] == "SHORT"
+                         and (r["confidence"] >= min_confidence
+                              or (r["strategy"] == "RSI" and rsi_val is not None
+                                  and (rsi_val >= 70 or rsi_val <= 30)))]
+
+        # ---- Step 3: RSI extreme → clear opposing side (per-TF veto) ----
+        if rsi_val is not None:
             if rsi_val >= 70:
                 long_signals = []
-                rsi_extreme_override = "SHORT"   # RSI overbought → force SHORT
             if rsi_val <= 30:
                 short_signals = []
-                rsi_extreme_override = "LONG"    # RSI oversold → force LONG
 
-        # ---- Step 3: RSI-first vote (if RSI itself fired above gate) ----
+        # ---- Step 4: RSI-first vote (NO confidence gate — extreme always fires) ----
         rsi_vote = None
-        if (rsi_entry and rsi_entry.get("direction") in ("LONG", "SHORT")
-                and rsi_entry.get("confidence", 0) >= min_confidence):
+        if rsi_entry and rsi_entry.get("direction") in ("LONG", "SHORT"):
             rsi_vote = rsi_entry["direction"]
             if rsi_vote == "LONG":
                 short_signals = []
             else:
                 long_signals = []
 
-        # ---- Step 4: compute scores AFTER all clearing ----
+        # ---- Step 5: compute scores AFTER all clearing ----
         long_score = sum(r["confidence"] for r in long_signals)
         short_score = sum(r["confidence"] for r in short_signals)
         total_score = long_score + short_score
 
-        # ---- Step 5: decide direction ----
+        # ---- Step 6: decide direction ----
         direction = "NEUTRAL"
         signal_strength = 0.0
         strategies_used: List[str] = []
@@ -248,21 +314,9 @@ class StrategyEngine:
                 direction = "SHORT"
                 strategies_used = [r["strategy"] for r in short_signals]
 
-        # ---- Step 6: RSI EXTREME HARD OVERRIDE ----
-        # If RSI is in extreme zone and consensus is still NEUTRAL,
-        # FORCE the opposite direction — RSI is king.
-        if rsi_extreme_override and direction == "NEUTRAL":
-            direction = rsi_extreme_override
-            strategies_used = ["RSI_EXTREME"]
-            deviation = abs(rsi_val - 50)
-            veto_reason = f"RSI {rsi_val:.1f} extreme → forced {direction}"
-
         # ---- Step 7: signal strength ----
         if direction != "NEUTRAL" and total_score > 0:
             signal_strength = abs(long_score - short_score) / total_score
-        elif rsi_extreme_override:
-            # Base strength for RSI-extreme-only override
-            signal_strength = 0.6
 
         # ---- Step 8: avg confidence — WINNING SIDE ONLY ----
         avg_confidence = 0
@@ -270,10 +324,6 @@ class StrategyEngine:
             avg_confidence = int(sum(r["confidence"] for r in long_signals) / len(long_signals))
         elif direction == "SHORT" and short_signals:
             avg_confidence = int(sum(r["confidence"] for r in short_signals) / len(short_signals))
-        elif rsi_extreme_override and rsi_val is not None:
-            # Confidence based on how far RSI is from neutral (50)
-            deviation = abs(rsi_val - 50)
-            avg_confidence = min(95, int(60 + deviation * 0.8))
 
         return {
             "direction": direction,
@@ -285,4 +335,5 @@ class StrategyEngine:
             "short_count": len(short_signals),
             "rsi": rsi_val,
             "veto_reason": veto_reason,
+            "rsi_force": None,
         }
