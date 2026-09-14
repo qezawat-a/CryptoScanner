@@ -162,8 +162,8 @@ class SignalScanner:
                 total_w = sum(TF_WEIGHTS.get(t, 1.0) for t in intervals)
                 aligned_w = sum(TF_WEIGHTS.get(t, 1.0) for t, r in all_results.items()
                                 if r.get("direction") == fside)
-                fw = short_weight if fside == "SHORT" else long_weight
-                ow = long_weight if fside == "SHORT" else short_weight
+                fw = short_w if fside == "SHORT" else long_w
+                ow = long_w if fside == "SHORT" else short_w
                 win_conf = fw / voted_w if voted_w else 0.0
                 conf = int((aligned_w / total_w) * (60 + 40 * win_conf)) if total_w else 0
                 strength = (fw - ow) / voted_w if voted_w else 0.0

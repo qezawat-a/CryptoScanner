@@ -53,39 +53,6 @@ def _lean_info(lean: str, lean_conf: int) -> dict:
     return {"lean": lean, "lean_conf": lean_conf if lean != "NEUTRAL" else 0}
 
 
-def _ema(values: List[float], span: int) -> List[float]:
-    k = 2.0 / (span + 1.0)
-    out = []
-    e = None
-    for v in values:
-        e = v if e is None else v * k + e * (1 - k)
-        out.append(e)
-    return out
-
-
-def _rsi_wilder_ewm(closes: List[float], period: int) -> List[float]:
-    alpha = 1.0 / period
-    avg_gain, avg_loss = 0.0, 0.0
-    rsis = []
-    prev = closes[0]
-    started = False
-    for c in closes:
-        if not started:
-            started = True
-            prev = c
-            rsis.append(50.0)
-            continue
-        delta = c - prev
-        prev = c
-        gain = delta if delta > 0 else 0.0
-        loss = -delta if delta < 0 else 0.0
-        avg_gain = gain * alpha + avg_gain * (1 - alpha)
-        avg_loss = loss * alpha + avg_loss * (1 - alpha)
-        rs = avg_gain / (avg_loss if avg_loss != 0 else 1e-10)
-        rsis.append(100 - (100 / (1 + rs)))
-    return rsis
-
-
 class EMAStrategy:
     name = "EMA"
 
@@ -300,12 +267,14 @@ class StrategyEngine:
         strategies_used: List[str] = []
         veto_reason = None
 
-        if rsi_vote == "LONG" and long_signals:
+        if rsi_vote == "LONG":
+            # RSI extreme forces LONG even if no other strategy agrees
             direction = "LONG"
-            strategies_used = [r["strategy"] for r in long_signals]
-        elif rsi_vote == "SHORT" and short_signals:
+            strategies_used = [r["strategy"] for r in long_signals] if long_signals else ["RSI"]
+        elif rsi_vote == "SHORT":
+            # RSI extreme forces SHORT even if no other strategy agrees
             direction = "SHORT"
-            strategies_used = [r["strategy"] for r in short_signals]
+            strategies_used = [r["strategy"] for r in short_signals] if short_signals else ["RSI"]
         elif rsi_vote is None:
             if long_score > short_score and len(long_signals) >= min_agree:
                 direction = "LONG"
@@ -324,6 +293,9 @@ class StrategyEngine:
             avg_confidence = int(sum(r["confidence"] for r in long_signals) / len(long_signals))
         elif direction == "SHORT" and short_signals:
             avg_confidence = int(sum(r["confidence"] for r in short_signals) / len(short_signals))
+        elif direction != "NEUTRAL" and rsi_entry:
+            # rsi_vote forced direction but no other signals — use RSI confidence directly
+            avg_confidence = rsi_entry.get("confidence", 0)
 
         return {
             "direction": direction,

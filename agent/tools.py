@@ -24,27 +24,33 @@ TOOLS = [
     {"name": "set_symbol",
      "description": "Avaz symbol e scan (mesle BTC, saga_usdt).",
      "parameters": {"type": "object", "properties": {
-         "symbol": {"type": "string", "description": "new symbol"}}}, "required": ["symbol"]},
+         "symbol": {"type": "string", "description": "new symbol"}},
+         "required": ["symbol"]}},
     {"name": "set_setting",
      "description": "Tanzim: timeframes, min_confidence, tf_min_confidence, min_agreeing_strategies, cooldown_minutes. INTERVAL HA INJA NIST — report=set_report_interval, scan=set_scan_interval.",
      "parameters": {"type": "object", "properties": {
-         "key": {"type": "string"}, "value": {"type": "string"}}}, "required": ["key", "value"]},
+         "key": {"type": "string"}, "value": {"type": "string"}},
+         "required": ["key", "value"]}},
     {"name": "set_report_interval",
      "description": "Gozaresh KAMEL har N saniye be user, hatta bedune signal. Vaghti user mige 'report interval'/'send reports'/'show scans'/'bebinim chi mige' IN RA bezan. 0=off.",
      "parameters": {"type": "object", "properties": {
-         "seconds": {"type": "string"}}}, "required": ["seconds"]},
+         "seconds": {"type": "string"}},
+         "required": ["seconds"]}},
     {"name": "set_scan_interval",
      "description": "Har chand saniye scanner dar background run shavad (SILENT, faghat ALIGNED). Vaghti user mige 'scan interval'/'scan frequency' IN RA bezan. Min 15.",
      "parameters": {"type": "object", "properties": {
-         "seconds": {"type": "string"}}}, "required": ["seconds"]},
+         "seconds": {"type": "string"}},
+         "required": ["seconds"]}},
     {"name": "remember",
      "description": "Zakhire dars dar hafeze (observation, lesson).",
      "parameters": {"type": "object", "properties": {
-         "key": {"type": "string"}, "value": {"type": "string"}}}, "required": ["key", "value"]},
+         "key": {"type": "string"}, "value": {"type": "string"}},
+         "required": ["key", "value"]}},
     {"name": "no_signal",
      "description": "Sabt tasmim: alan signal nist, sabr. Dalil begu.",
      "parameters": {"type": "object", "properties": {
-         "reason": {"type": "string"}}}, "required": ["reason"]},
+         "reason": {"type": "string"}},
+         "required": ["reason"]}},
 ]
 
 TOOLS_AUTO = [t for t in TOOLS if t["name"] not in ("set_symbol", "set_setting", "set_report_interval", "set_scan_interval")]
