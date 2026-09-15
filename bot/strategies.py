@@ -44,8 +44,17 @@ def _rsi_wilder_ewm(closes: List[float], period: int) -> List[float]:
         loss = -delta if delta < 0 else 0.0
         avg_gain = gain * alpha + avg_gain * (1 - alpha)
         avg_loss = loss * alpha + avg_loss * (1 - alpha)
-        rs = avg_gain / (avg_loss if avg_loss != 0 else 1e-10)
-        rsis.append(100 - (100 / (1 + rs)))
+        # Flat/no-movement window: no gains AND no losses -> RSI is undefined.
+        # By convention it is 50 (neutral). The old code divided 0 by 1e-10,
+        # producing RSI=0 (extreme oversold) on flat/ranging data, which then
+        # falsely forced LONG/SHORT signals via the RSI override.
+        if avg_gain == 0 and avg_loss == 0:
+            rsis.append(50.0)
+        elif avg_loss == 0:
+            rsis.append(100.0)
+        else:
+            rs = avg_gain / avg_loss
+            rsis.append(100 - (100 / (1 + rs)))
     return rsis
 
 
@@ -128,8 +137,8 @@ class RSIStrategy:
             return "NEUTRAL", 0, {}
         r = _rsi_wilder_ewm(closes, self.period)
         prev_rsi, curr_rsi = r[-2], r[-1]
-        # Always return current RSI value for visibility and override logic
-        details = {"rsi": curr_rsi}
+        # Note: current RSI value is always included in the details of every
+        # return below (for visibility in reports and the MTF override logic).
 
         if prev_rsi < self.oversold and curr_rsi > self.oversold:
             strength = min(100, (curr_rsi - self.oversold) * 2)
