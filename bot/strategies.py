@@ -139,11 +139,11 @@ class RSIStrategy:
             strength = min(100, (self.overbought - curr_rsi) * 2)
             conf = min(90, int(60 + strength * 1.5))
             return "SHORT", conf, {"rsi": curr_rsi, **_lean_info("SHORT", conf)}
-        if curr_rsi < self.oversold:
+        if curr_rsi <= self.oversold:
             strength = min(100, (self.oversold - curr_rsi) * 2)
             conf = min(90, int(60 + strength * 1.5)) - 10
             return "LONG", conf, {"rsi": curr_rsi, **_lean_info("LONG", conf)}
-        if curr_rsi > self.overbought:
+        if curr_rsi >= self.overbought:
             strength = min(100, (curr_rsi - self.overbought) * 2)
             conf = min(90, int(60 + strength * 1.5)) - 10
             return "SHORT", conf, {"rsi": curr_rsi, **_lean_info("SHORT", conf)}
@@ -244,8 +244,10 @@ class StrategyEngine:
         if rsi_val is not None:
             if rsi_val >= 70:
                 long_signals = []
+                veto_reason = f"RSI>={70} vetoed LONG"
             if rsi_val <= 30:
                 short_signals = []
+                veto_reason = f"RSI<={30} vetoed SHORT"
 
         # ---- Step 4: RSI-first vote (NO confidence gate — extreme always fires) ----
         rsi_vote = None
